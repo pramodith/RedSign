@@ -293,6 +293,7 @@ class Darknet(nn.Module):
 
 def train(epochs=100):
     num_classes=1
+    total_loss=0
     loss_coordinates=nn.MSELoss()
     loss_confidence=nn.BCELoss()
     model=Darknet('cfg/yolov3-tiny.cfg')
@@ -301,6 +302,7 @@ def train(epochs=100):
         model=model.cuda()
     loader=read_all_images("data")
     for i in range(epochs):
+        print(i)
         for img,target_bbox,label in loader:
             if torch.cuda.is_available():
                 img=img.cuda()
@@ -308,7 +310,7 @@ def train(epochs=100):
                 label=label.cuda()
             detections=model(img,False)
             detections1=detections.clone()
-            total_loss=0
+            loss_val=0
             for bn in range(1):
                 mask = []
                 detections1=detections1[detections1[:,0]==np.float(bn)]
@@ -319,13 +321,15 @@ def train(epochs=100):
                         mask.append(torch.argmax(ious))
 
                 for j in range(4):
-                    total_loss+=loss_coordinates(detections1[mask,1+j],target_bbox[bn,mask2,j],)
+                    loss_val+=loss_coordinates(detections1[mask,1+j],target_bbox[bn,mask2,j],)
                 for j in range(num_classes+1):
-                    total_loss+=loss_confidence(detections1[mask,5+j],torch.ones(len(mask)).cuda())
-            print(total_loss)
+                    loss_val+=loss_confidence(detections1[mask,5+j],torch.ones(len(mask)).cuda())
             optim.zero_grad()
-            total_loss.backward()
+            loss_val.backward()
+            total_loss+=loss_val.item()
             optim.step()
+        print(total_loss)
+        torch.save(model.state_dict(), "saved_weights.pkl")
 
 
 train()

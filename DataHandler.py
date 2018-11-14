@@ -33,7 +33,7 @@ class DataHandler(Dataset):
         #load the names of all files directory X and directory Y's files are named the same but are at different resolutions
         self.bbox_locations, self.bbox_labels = self.process_gt()
         #self.names=[os.path.join(path,f) for  f in os.listdir(self.path) if os.path.isfile(os.path.join(path,f))]
-        self.names=list(self.bbox_locations.keys())
+        self.names=list(self.bbox_locations.keys())[:500]
         self.names = [os.path.join(path, self.names[ind]) for ind in range(len(self.names))]
         self.transform=transform
         self.loaded_images=[]
@@ -42,14 +42,12 @@ class DataHandler(Dataset):
         return len(self.names)
 
     def process_gt(self):
-        label=0
         bbox_locations={}
         bbox_labels={}
         with open(self.gt_path,'r') as f:
             lines=f.readlines()
             for line in lines:
                 columns=line.split(";")
-                bbox_labels[columns[0]]=0
                 if columns[0] not in bbox_locations:
                     bbox_locations[columns[0]]=[[float(columns[1])//self.scale_factor1,float(columns[2])//self.scale_factor2,float(columns[3])//self.scale_factor1,
                                                  float(columns[4])//self.scale_factor2]]
