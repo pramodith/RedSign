@@ -28,12 +28,14 @@ class DataHandler(Dataset):
     def __init__(self,gt_file_path,path,transform=None,scale_factor=1):
         self.path=path
         self.gt_path = gt_file_path
-        self.scale_factor1=1360/400
-        self.scale_factor2=800/400
+        self.scale_factor1=1360/416
+        self.scale_factor2=800/416
         #load the names of all files directory X and directory Y's files are named the same but are at different resolutions
-        self.names=[os.path.join(path,f) for  f in os.listdir(self.path) if os.path.isfile(os.path.join(path,f))]
+        self.bbox_locations, self.bbox_labels = self.process_gt()
+        #self.names=[os.path.join(path,f) for  f in os.listdir(self.path) if os.path.isfile(os.path.join(path,f))]
+        self.names=list(self.bbox_locations.keys())
+        self.names = [os.path.join(path, self.names[ind]) for ind in range(len(self.names))]
         self.transform=transform
-        self.bbox_locations,self.bbox_labels=self.process_gt()
         self.loaded_images=[]
 
     def __len__(self):
@@ -86,13 +88,13 @@ def pad_uneven_number_bbox(batch):
     return img,bboxes,label
 
 #function to create a mini-batch loader instance
-def read_all_images(path,batch_size=1,num_workers=0):
+def read_all_images(path,batch_size=4,num_workers=0):
     #the mean and std were calculated using numpy and then scaled down to 0-1 range
     dataset_mean = [0.4884048, 0.4982816, 0.50658032]
     dataset_std = [0.0909427*255, 0.0954222*255, 0.01157272*255]
     transform = transforms.Compose([
         #CLAHE(),
-        transforms.Resize((400,400)),
+        transforms.Resize((416,416)),
         transforms.ToTensor(),
         transforms.Normalize(dataset_mean, dataset_std),
     ])

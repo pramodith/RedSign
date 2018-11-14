@@ -130,6 +130,16 @@ def create_modules(blocks):
             else:
                 filters = output_filters[index + start]
 
+        elif x["type"] == "maxpool":
+            stride = int(x["stride"])
+            size = int(x["size"])
+            if stride != 1:
+                maxpool = nn.MaxPool2d(size, stride)
+            else:
+                maxpool = MaxPoolStride1(size)
+
+            module.add_module("maxpool_{}".format(index), maxpool)
+
         # shortcut corresponds to skip connection
         elif x["type"] == "shortcut":
             shortcut = EmptyLayer()
@@ -145,14 +155,80 @@ def create_modules(blocks):
             anchors = [(anchors[i], anchors[i + 1]) for i in range(0, len(anchors), 2)]
             anchors = [anchors[i] for i in mask]
 
-            detection = DetectionLayer(anchors)
-            module.add_module("Detection_{}".format(index), detection)
+            detection = YOLO(anchors)
+            module.add_module("YOLO_{}".format(index), detection)
 
         module_list.append(module)
         prev_filters = filters
         output_filters.append(filters)
 
     return (net_info, module_list)
+
+class YOLO(nn.Module):
+
+    def __init__(self,anchors):
+        super(YOLO,self).__init__()
+        self.anchors=anchors
+
+    def forward(self,input):
+        prediction, inp_dim, anchors, num_classes,_=input
+        CUDA=True
+        batch_size = prediction.size(0)
+        stride = inp_dim // prediction.size(2)
+        grid_size = inp_dim // stride
+        bbox_attrs = 5 + num_classes
+        num_anchors = len(anchors)
+
+        prediction = prediction.view(batch_size, bbox_attrs * num_anchors, grid_size * grid_size)
+        prediction = prediction.transpose(1, 2).contiguous()
+        prediction = prediction.view(batch_size, grid_size * grid_size * num_anchors, bbox_attrs)
+        anchors = [(a[0] / stride, a[1] / stride) for a in anchors]
+
+        # Sigmoid the  centre_X, centre_Y. and object confidencce
+        prediction[:, :, 0] = torch.sigmoid(prediction[:, :, 0])
+        prediction[:, :, 1] = torch.sigmoid(prediction[:, :, 1])
+        prediction[:, :, 4] = torch.sigmoid(prediction[:, :, 4])
+
+        # Add the center offsets
+        grid = np.arange(grid_size)
+        a, b = np.meshgrid(grid, grid)
+
+        x_offset = torch.FloatTensor(a).view(-1, 1)
+        y_offset = torch.FloatTensor(b).view(-1, 1)
+
+        if CUDA:
+            x_offset = x_offset.cuda()
+            y_offset = y_offset.cuda()
+
+        x_y_offset = torch.cat((x_offset, y_offset), 1).repeat(1, num_anchors).view(-1, 2).unsqueeze(0)
+
+        prediction[:, :, :2] += x_y_offset
+
+        # log space transform height and the width
+        anchors = torch.FloatTensor(anchors)
+
+        if CUDA:
+            anchors = anchors.cuda()
+
+        anchors = anchors.repeat(grid_size * grid_size, 1).unsqueeze(0)
+        prediction[:, :, 2:4] = torch.exp(prediction[:, :, 2:4]) * anchors
+
+        prediction[:, :, 5: 5 + num_classes] = torch.sigmoid((prediction[:, :, 5: 5 + num_classes]))
+
+        prediction[:, :, :4] *= stride
+
+        return prediction
+
+class MaxPoolStride1(nn.Module):
+    def __init__(self, kernel_size):
+        super(MaxPoolStride1, self).__init__()
+        self.kernel_size = kernel_size
+        self.pad = kernel_size - 1
+
+    def forward(self, x):
+        padded_x = F.pad(x, (0, self.pad, 0, self.pad), mode="replicate")
+        pooled_x = nn.MaxPool2d(self.kernel_size, self.pad)(padded_x)
+        return pooled_x
 
 class Darknet(nn.Module):
     def __init__(self, cfgfile):
@@ -168,13 +244,12 @@ class Darknet(nn.Module):
         for i, module in enumerate(modules):
             module_type = (module["type"])
 
-            if module_type == "convolutional" or module_type == "upsample":
+            if module_type == "convolutional" or module_type == "upsample" or module_type=='maxpool':
                 x = self.module_list[i](x)
 
             elif module_type == "route":
                 layers = module["layers"]
                 layers = [int(a) for a in layers]
-
                 if (layers[0]) > 0:
                     layers[0] = layers[0] - i
 
@@ -184,9 +259,8 @@ class Darknet(nn.Module):
                 else:
                     if (layers[1]) > 0:
                         layers[1] = layers[1] - i
-
                     map1 = outputs[i + layers[0]]
-                    map2 = outputs[i + layers[1]]
+                    map2 = outputs[i+layers[1]]
                     x = torch.cat((map1, map2), 1)
 
 
@@ -203,8 +277,8 @@ class Darknet(nn.Module):
                 num_classes = int(module["classes"])
 
                 # Transform
-                x = x.data
-                x = predict_transform(x, inp_dim, anchors, num_classes, CUDA)
+
+                x = self.module_list[i]([x, inp_dim, anchors, num_classes, CUDA])
                 if not write:  # if no collector has been intialised.
                     detections = x
                     write = 1
@@ -213,8 +287,9 @@ class Darknet(nn.Module):
                     detections = torch.cat((detections, x), 1)
 
             outputs[i] = x
+        bboxes=write_results(detections, 0.4, 1, nms_conf=0.4)
+        return bboxes
 
-        return detections
 
 def train(epochs=100):
     num_classes=1
@@ -223,22 +298,27 @@ def train(epochs=100):
     model=Darknet('cfg/yolov3-tiny.cfg')
     optim = torch.optim.Adam(model.parameters())
     if torch.cuda.is_available():
-        pass
-        #model=model.cuda()
+        model=model.cuda()
     loader=read_all_images("data")
     for i in range(epochs):
         for img,target_bbox,label in loader:
             if torch.cuda.is_available():
-                pass
-                #img=img.cuda()
-                #target_bbox=target_bbox.cuda()
-                #label=label.cuda()
-            detections=model(img,True)
+                img=img.cuda()
+                target_bbox=target_bbox.cuda()
+                label=label.cuda()
+            detections=model(img,False)
+            detections1=detections.clone()
+            mask=[]
+            for k in range(len(target_bbox[0])):
+                ious=bbox_iou(target_bbox[0][k].view(1,-1),detections1[:,1:5])
+                mask.append(torch.argmax(ious))
             total_loss=0
-            for j in range(4):
-                total_loss+=loss_coordinates(target_bbox[:j],detections[:j])
-            for j in range(num_classes+1):
-                total_loss+=loss_confidence(target_bbox[:4+j],label)
+            for bn in range(1):
+                detections=detections[detections[:,0]==np.float(bn)]
+                for j in range(4):
+                    total_loss+=loss_coordinates(detections[mask,1+j],target_bbox[bn,:,j],)
+                for j in range(num_classes+1):
+                    total_loss+=loss_confidence(detections[mask,5+j],torch.zeros(len(target_bbox[bn])).cuda())
             print(total_loss)
             optim.zero_grad()
             total_loss.backward()
