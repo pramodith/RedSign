@@ -308,17 +308,20 @@ def train(epochs=100):
                 label=label.cuda()
             detections=model(img,False)
             detections1=detections.clone()
-            mask=[]
-            for k in range(len(target_bbox[0])):
-                ious=bbox_iou(target_bbox[0][k].view(1,-1),detections1[:,1:5])
-                mask.append(torch.argmax(ious))
             total_loss=0
             for bn in range(1):
-                detections=detections[detections[:,0]==np.float(bn)]
+                mask = []
+                detections1=detections1[detections1[:,0]==np.float(bn)]
+                mask2=torch.sum(target_bbox[bn],1)>0
+                for k in range(len(mask2)):
+                    if mask2[k]==1:
+                        ious = bbox_iou(target_bbox[bn][k].view(1, -1), detections1[:, 1:5])
+                        mask.append(torch.argmax(ious))
+
                 for j in range(4):
-                    total_loss+=loss_coordinates(detections[mask,1+j],target_bbox[bn,:,j],)
+                    total_loss+=loss_coordinates(detections1[mask,1+j],target_bbox[bn,mask2,j],)
                 for j in range(num_classes+1):
-                    total_loss+=loss_confidence(detections[mask,5+j],torch.zeros(len(target_bbox[bn])).cuda())
+                    total_loss+=loss_confidence(detections1[mask,5+j],torch.ones(len(mask)).cuda())
             print(total_loss)
             optim.zero_grad()
             total_loss.backward()
