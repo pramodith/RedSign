@@ -303,30 +303,32 @@ def train(epochs=100):
     loader=read_all_images("data")
     for i in range(epochs):
         print(i)
+        cnt=0
         for img,target_bbox,label in loader:
             if torch.cuda.is_available():
                 img=img.cuda()
                 target_bbox=target_bbox.cuda()
                 label=label.cuda()
             detections=model(img,False)
-            detections1=detections.clone()
+            #detections1=detections.clone()
             loss_val=0
             for bn in range(1):
                 mask = []
-                detections1=detections1[detections1[:,0]==np.float(bn)]
+                detections1=detections[detections[:,0]==np.float(bn)]
                 mask2=torch.sum(target_bbox[bn],1)>0
                 for k in range(len(mask2)):
                     if mask2[k]==1:
-                        ious = bbox_iou(target_bbox[bn][k].view(1, -1), detections1[:, 1:5])
+                        ious = bbox_iou(target_bbox[bn][k].view(1, -1), detections[:, 1:5])
                         mask.append(torch.argmax(ious))
 
                 for j in range(4):
-                    loss_val+=loss_coordinates(detections1[mask,1+j],target_bbox[bn,mask2,j],)
+                    loss_val+=loss_coordinates(detections[mask,1+j],target_bbox[bn,mask2,j],)
                 for j in range(num_classes+1):
-                    loss_val+=loss_confidence(detections1[mask,5+j],torch.ones(len(mask)).cuda())
+                    loss_val+=loss_confidence(detections[mask,5+j],torch.ones(len(mask)).cuda())
             optim.zero_grad()
             loss_val.backward()
             total_loss+=loss_val.item()
+            del loss_val
             optim.step()
         print(total_loss)
         torch.save(model.state_dict(), "saved_weights.pkl")
