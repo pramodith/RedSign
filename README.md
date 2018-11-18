@@ -20,3 +20,4 @@ You can train the YOLOv3 by using the command python DNN.py, initial training di
 showcase the results on the test set for YOLOv3.
 
 Please feel free to contact me if you run into any issues while running the code.
+Credit should go to https://github.com/jwyang/faster-rcnn.pytorch and https://github.com/ayooshkathuria/YOLO_v3_tutorial_from_scratch for the faster_rcnn and YOLOv3 codebases that I used to suit my requirements.
