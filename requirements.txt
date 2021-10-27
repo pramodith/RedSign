@@ -39,7 +39,7 @@ cycler==0.10.0
 Cython==0.28
 cytoolz==0.8.2
 cyvlfeat==0.4.6
-dask==0.15.3
+dask==2021.10.0
 datashape==0.5.4
 deap==1.2.2
 decorator==4.1.2
